@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -ex
 
 shopt -s dotglob
 
