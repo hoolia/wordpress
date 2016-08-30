@@ -1,3 +1,0 @@
-#!/bin/sh
-
-cp -f /tmp/src/docker-entrypoint.sh /docker-entrypoint.sh

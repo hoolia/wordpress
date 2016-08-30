@@ -1,40 +1,14 @@
 #!/bin/bash
 
 set -ex
-
 shopt -s dotglob
 
-
-echo "---> Installing Wordpress..."
-if ! [ -e index.php -a -e wp-includes/version.php ]; then
-	echo >&2 "WordPress not found in $(pwd) - copying now..."
-	if [ "$(ls -A)" ]; then
-		echo >&2 "WARNING: $(pwd) is not empty!"
-	fi
-	tar cf - --one-file-system -C /usr/src/wordpress . | tar -xf -
-	echo >&2 "Complete! WordPress has been successfully copied to $(pwd)"
-	if [ ! -e .htaccess ]; then
-		# NOTE: The "Indexes" option is disabled in the php:apache base image
-		cat > .htaccess <<-'EOF'
-			# BEGIN WordPress
-			<IfModule mod_rewrite.c>
-			RewriteEngine On
-			RewriteBase /
-			RewriteRule ^index\.php$ - [L]
-			RewriteCond %{REQUEST_FILENAME} !-f
-			RewriteCond %{REQUEST_FILENAME} !-d
-			RewriteRule . /index.php [L]
-			</IfModule>
-			# END WordPress
-		EOF
-		chown www-data:www-data .htaccess
-	fi
-fi
+cd /usr/src/wordpress
 
 echo "---> Installing application source..."
-tar --remove-files -C /tmp/src -cf - . |tar xf -
+tar --remove-files -C /tmp/src -cf - . |tar -xf -
 
 # Fix source directory permissions
-find ./ -exec chgrp 0     {} \;
-find ./ -exec chmod g+rwX {} \;
+chgrp -R 33    .
+chmod -R g+rwX .
 
