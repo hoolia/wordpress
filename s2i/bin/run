@@ -2,4 +2,6 @@
 
 set -ex
 
-exec /entrypoint.sh "$@"
+/usr/local/bin/flyway migrate
+
+exec docker-entrypoint.sh apache2-foreground

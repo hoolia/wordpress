@@ -3,12 +3,13 @@
 set -ex
 shopt -s dotglob
 
-cd /usr/src/wordpress
+cd /var/www
 
 echo "---> Installing application source..."
-tar --remove-files -C /tmp/src -cf - . |tar -xf -
+tar -C /tmp/src -cvf - . |tar -xvf -
 
 # Fix source directory permissions
 chgrp -R 33    .
 chmod -R g+rwX .
 
+rm -rf /tmp/src

@@ -1,12 +1,11 @@
-#!/bin/sh -x
+#!/bin/bash -x
 
 echo "Found SQL files:"
-cd /usr/local/flyway-4.0/sql
+cd /usr/local/flyway*/sql
 ls -l *.sql
 
-/usr/local/flyway-4.0/flyway -X $* \
-  -url=${WORDPRESS_DB_HOST}
-  -user=${MYSQL_ENV_MYSQL_USER} \
-  -password=${DMYSQL_ENV_MYSQL_PASSWORD} \
-  -schemas=${MYSQL_ENV_MYSQL_DATABASE}
-#  -target=${OPENSHIFT_BUILD_REFERENCE/v/}
+/usr/local/flyway*/flyway -X $* \
+  -url=jdbc:mysql://${WORDPRESS_DB_HOST:=mysql}:${WORDPRESS_DB_PORT:=3306}/${WORDPRESS_DB_NAME:=wordpress} \
+  -user=${WORDPRESS_DB_USER:=root} \
+  -password=${WORDPRESS_DB_PASSWORD} \
+  -schemas=${WORDPRESS_DB_NAME:=wordpress}

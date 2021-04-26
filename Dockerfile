@@ -11,19 +11,21 @@ LABEL com.redhat.deployments-dir="/var/www/html" \
       io.openshift.min-memory=200Mi \
       io.openshift.min-cpu=0.1
 
+EXPOSE 8080
 
 USER 0
 
 ADD s2i/bin/*   /usr/local/s2i/
-
-#RUN  curl https://repo1.maven.org/maven2/org/flywaydb/flyway-commandline/4.0/flyway-commandline-4.0-linux-x64.tar.gz |tar -C/usr/local -zx; \
-#     chmod +x   /usr/local/flyway-4.0/flyway; \
-#     rm -rf /usr/local/flyway-4.0/sql; \
-#     ln -s /var/www/sql/ /usr/local/flyway-4.0
-#COPY bin/flyway.sh             /usr/local/bin/flyway
-#COPY configuration/flyway.conf /usr/local/flyway-4.0/conf/flyway.conf
+#ADD flyway-commandline-7.8.1-linux-x64.tar.gz /usr/local
+RUN  curl https://repo1.maven.org/maven2/org/flywaydb/flyway-commandline/7.8.1/flyway-commandline-7.8.1-linux-x64.tar.gz |tar -C/usr/local -zx; \
+     chmod +x   /usr/local/flyway-7.8.1/flyway; \
+     rm -rf /usr/local/flyway-7.8.1/sql; \
+     ln -s /var/www/sql/ /usr/local/flyway-7.8.1
+COPY bin/flyway.sh             /usr/local/bin/flyway
+COPY configuration/flyway.conf /usr/local/flyway-7.8.1/conf/flyway.conf
+COPY configuration/apache2/sites-enabled/000-default.conf /etc/apache2/sites-enabled/000-default.conf
+COPY configuration/apache2/ports.conf /etc/apache2/ports.conf
 
 USER 33
 
 ENTRYPOINT ["/usr/local/s2i/run"]
-CMD ["apache2-foreground"]
