@@ -1,4 +1,5 @@
-FROM library/wordpress:apache
+#FROM hoolia/wordpress:3.8.38
+FROM docker.io/centurylink/wordpress:3.9.1
 
 LABEL com.redhat.deployments-dir="/var/www/html" \
       com.redhat.dev-mode="DEBUG:true" \
@@ -25,6 +26,7 @@ COPY bin/flyway.sh             /usr/local/bin/flyway
 COPY configuration/flyway.conf /usr/local/flyway-7.8.1/conf/flyway.conf
 COPY configuration/apache2/sites-enabled/000-default.conf /etc/apache2/sites-enabled/000-default.conf
 COPY configuration/apache2/ports.conf /etc/apache2/ports.conf
+COPY configuration/wp-config.php /var/www/html/wp-config.php
 
 USER 33
 
