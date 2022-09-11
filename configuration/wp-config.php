@@ -79,17 +79,16 @@ $table_prefix  = 'wp_';
  * It is strongly recommended that plugin and theme developers use WP_DEBUG
  * in their development environments.
  */
-define('WP_DEBUG', !!getenv_docker('WORDPRESS_DEBUG', '') );
 
 /** Report all errors */
-@ini_set('log_errors'    , 'Off');
-@ini_set('display_errors', 'Off');
-//define('WP_DEBUG_LOG', true);
-//define('WP_DEBUG_DISPLAY', false);
+@ini_set('log_errors'    , 'On');
+@ini_set('display_errors', 'On');
+define('WP_DEBUG_LOG', true);
+define('WP_DEBUG_DISPLAY', true);
 
 /** Prevent editing by Admin -> Appearance -> Editor **/
-define('DISALLOW_FILE_EDIT', true);
-define('DISALLOW_FILE_MODS', true);
+define('DISALLOW_FILE_EDIT', false);
+define('DISALLOW_FILE_MODS', false);
 
 /** Prevent WP Schedule System **/
 define('DISABLE_WP_CRON', false);
