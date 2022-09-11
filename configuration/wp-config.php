@@ -104,10 +104,6 @@ define('WP_AUTO_UPDATE_CORE', false);
 /** Set default theme **/
 define('WP_DEFAULT_THEME', 'hoolia');
 
-/** Allow MultiSite domainnames **/
-define('WP_SITEURL', 'https://' . $_SERVER['HTTP_HOST'] . '/');
-define('WP_HOME'   , 'https://' . $_SERVER['HTTP_HOST'] . '/');
-
 /** Handle behind a Reverse Proxy **/
 define('FORCE_SSL_ADMIN', true);
 if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
@@ -115,9 +111,9 @@ if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROT
         $_SERVER['HTTP_HOST'] = $_SERVER['HTTP_X_FORWARDED_HOST'];
 }
 
-if ($configExtra = getenv_docker('WORDPRESS_CONFIG_EXTRA', '')) {
-        eval($configExtra);
-}
+/** Allow MultiSite domainnames **/
+define('WP_SITEURL', 'https://' . $_SERVER['HTTP_HOST'] . '/');
+define('WP_HOME'   , 'https://' . $_SERVER['HTTP_HOST'] . '/');
 
 /** Absolute path to the WordPress directory. */
 if ( !defined('ABSPATH') )
