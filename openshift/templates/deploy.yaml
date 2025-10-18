@@ -1,0 +1,223 @@
+# Template
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: wordpress
+labels:
+  template: wordpress
+
+parameters:
+  - name: "NAMESPACE"
+    required: false
+  - name: "ENVIRONMENT"
+    required: true
+  - name: "APP_NAME"
+    required: true
+  - name: "WORDPRESS_CURRENT_SITE"
+    required: true
+  - name: "RESOURCES_REQUEST_CPU"
+    required: true
+  - name: "RESOURCES_REQUEST_MEMORY"
+    required: true
+  - name: "RESOURCES_LIMIT_CPU"
+    required: true
+  - name: "RESOURCES_LIMIT_MEMORY"
+    required: true
+
+objects:
+  
+  # Namespace
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      annotations:
+        security.openshift.io/MinimallySufficientPodSecurityStandard: baseline
+      labels:
+        kubernetes.io/metadata.name: "${NAMESPACE}"
+        pod-security.kubernetes.io/audit: baseline
+        pod-security.kubernetes.io/warn: baseline
+      name: "${NAMESPACE}"
+
+  # BuildConfig 
+  - apiVersion: build.openshift.io/v1
+    kind: BuildConfig
+    metadata:
+      name: ${APP_NAME}
+    labels:
+      app: ${APP_NAME}
+    spec:
+      failedBuildsHistoryLimit: 1
+      successfulBuildsHistoryLimit: 1
+      output:
+        to:
+          kind: ImageStreamTag
+          name: ${APP_NAME}:${ENVIRONMENT}
+      postCommit: {}
+      resources:
+        limits:
+          memory: "1Gi"
+      runPolicy: Serial
+      source:
+        binary:
+          contextDir: .
+      strategy:
+        dockerStrategy:
+          dockerfilePath: Dockerfile
+
+  # ImageStream
+  - apiVersion: image.openshift.io/v1
+    kind: ImageStream
+    metadata:
+      name: ${APP_NAME}
+      labels:
+        app: ${APP_NAME}
+    spec:
+      lookupPolicy:
+        local: true
+
+  # Persistent Volume Claim
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: wordpress-wp-uploads
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi
+  
+  # Deployment
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: ${APP_NAME}
+      annotations:
+        image.openshift.io/triggers: >-
+          [
+            {
+              "from": {
+                "kind": "ImageStreamTag",
+                "name": "${APP_NAME}:${ENVIRONMENT}"
+              },
+              "fieldPath": "spec.template.spec.containers[?(@.name==\"${APP_NAME}\")].image",
+              "pause": false
+            }
+          ]
+    spec:
+      replicas: 1
+      revisionHistoryLimit: 1
+      selector:
+        matchLabels:
+          app: ${APP_NAME}
+          component: wordpress
+      strategy:
+        type: Recreate
+      template:
+        metadata:
+          labels:
+            app: ${APP_NAME}
+            component: wordpress
+            technology: mysql
+            backup: daily
+        spec:
+          containers:
+            - name: ${APP_NAME}
+              image: ${IMAGE}
+              imagePullPolicy: Always
+              resources:
+                requests:
+                  cpu: ${RESOURCES_REQUEST_CPU}
+                  memory: ${RESOURCES_REQUEST_MEMORY}
+                limits:
+                  cpu: ${RESOURCES_LIMIT_CPU}
+                  memory: ${RESOURCES_LIMIT_MEMORY}
+              ports:
+                - containerPort: 8080
+                  name: http
+              volumeMounts:
+                - name: wordpress-wp-uploads
+                  mountPath: /var/www/html/wp-content/uploads
+              readinessProbe:
+                exec:
+                  command:
+                    - curl
+                    - -H
+                    - "X-K8S-PROBE: dummy"
+                    - http://127.0.0.1:8080/health.php
+                initialDelaySeconds: 3
+                timeoutSeconds: 3
+              livenessProbe:
+                exec:
+                  command:
+                    - curl
+                    - -H
+                    - "X-K8S-PROBE: dummy"
+                    - http://127.0.0.1:8080/health.php
+                initialDelaySeconds: 360
+                timeoutSeconds: 10
+              envFrom:
+                - secretRef:
+                    name: ${APP_NAME}-db
+                  prefix: WORDPRESS_DB_
+                - secretRef:
+                    name: ${APP_NAME}-db
+                  prefix: MYSQL_
+              env:
+                - name: ENVIRONMENT
+                  value: ${ENVIRONMENT}
+                - name: K8S_PROBE
+                  value: dummy
+                - name: WORDPRESS_TABLE_PREFIX
+                  value: wp_
+                - name: WORDPRESS_CURRENT_SITE
+                  value: ${WORDPRESS_CURRENT_SITE}
+          volumes:
+            - name: wordpress-wp-uploads
+              persistentVolumeClaim:
+                claimName: wordpress-wp-uploads
+  
+  # Service
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      labels:
+        app: ${APP_NAME}
+        component: wordpress
+      name: ${APP_NAME}
+    spec:
+      ports:
+      - name: 8080-tcp
+        port: 8080
+        protocol: TCP
+        targetPort: 8080
+      - name: 8443-tcp
+        port: 8443
+        protocol: TCP
+        targetPort: 8443
+      selector:
+        app: ${APP_NAME}
+        component: wordpress
+      sessionAffinity: None
+      type: ClusterIP
+  
+  # Route
+  - apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata:
+      annotations:
+        haproxy.router.openshift.io/hsts_header: max-age=31536000
+      labels:
+        app: ${APP_NAME}
+      name: ${APP_NAME}
+    spec:
+      port:
+        targetPort: 8080-tcp
+      to:
+        kind: Service
+        name: ${APP_NAME}
+        weight: 100
+      wildcardPolicy: None
+    tls:
+      termination: edge
+      insecureEdgeTerminationPolicy: Allow

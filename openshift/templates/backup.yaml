@@ -1,0 +1,246 @@
+---
+kind: Template
+apiVersion: template.openshift.io/v1
+metadata:
+  name: backup
+  annotations:
+    description: Scheduled Task to Regularly Backup OpenShift
+    iconClass: icon-shadowman
+    tags: management,cronjob,backup
+labels:
+  template: backup
+objects:
+- kind: ConfigMap
+  apiVersion: v1
+  metadata:
+    name: backup-script
+  data:
+    backup.sh: |
+      #!/bin/sh -x
+
+      DATE=`date +%Y%m%d.%H`
+      DIR="${DIR:-/var/backup/openshift}"
+
+      [ ! -d "$DIR" ] && mkdir -p $DIR
+
+      git config --global http.sslverify false
+      git config --global push.default simple
+      git config --global user.email "openshift-backup@hoolia.eu"
+      git config --global user.name "OpenShift Backup cronjob"
+
+      cd $DIR
+      [ "$GIT_REPO" ] && git clone $GIT_REPO . || git pull
+
+      git status 2>/dev/null && DIR=$DIR/backup || DIR=$DIR/$DATE
+      [ ! -d "$DIR" ] && mkdir -p $DIR
+
+      # Backup object per project for easy restore
+      mkdir -p $DIR/projects
+      cd $DIR/projects
+      for i in $NAMESPACE `oc get projects --no-headers |grep Active |awk '{print $1}'`
+      do
+        mkdir $i
+        cd $i
+        oc get -o yaml namespace $i >ns.yml
+        oc get -o yaml project   $i >project.yml
+        for j in pods replicationcontrollers deploymentconfigs buildconfigs services routes pvc quota hpa configmaps daemonsets deployments endpoints imagestreams ingress cronjobs jobs limitranges policies policybindings roles rolebindings resourcequotas replicasets serviceaccounts templates oauthclients statefulsets egressnetworkpolicy networkpolicy
+        do
+          mkdir $j
+          cd $j
+          for k in `oc get $j -n $i --no-headers |awk '{print $1}'`
+          do
+            echo export $j $k '-n' $i
+            oc get -o yaml $j $k -n $i >$k.yml
+          done
+          cd ..
+        done
+        cd ..
+      done
+
+      ### Persistent Data ###
+      oc observe --once pods     \
+        -a '{ .metadata.labels.deploymentconfig }' \
+        -a '{ .metadata.labels.technology }'       \
+        -a '{ .metadata.labels.backup     }'       \
+       |while read IGNORE1 IGNORE2 IGNORE3 IGNORE4 IGNORE5 PROJECT POD DC TECH SCHEDULE
+      do
+          [ "$SCHEDULE" == "\"\"" -o "$SCHEDULE" == "" ] && continue
+          [ "$DC" == "\"\"" ] && DC=$POD
+          echo "$POD in $PROJECT wants a $TECH $SCHEDULE backup"
+          mkdir -p $DIR/$TECH/$PROJECT  2>/dev/null
+          cd       $DIR/$TECH/$PROJECT
+          case $TECH in
+            mysql)
+              oc -n $PROJECT exec $POD -- /bin/sh -x -c 'PATH=$PATH:/opt/rh/mysql55/root/usr/bin:/opt/rh/rh-mysql56/root/usr/bin/ mysqldump --ignore-table=${MYSQL_DATABASE}.idhv_redirection_404 --ignore-table=${MYSQL_DATABASE}.idhv_3_redirection_404 --ignore-table=${MYSQL_DATABASE}.flyway_schema_history --no-tablespaces -h ${MYSQL_HOST:-127.0.0.1} -u ${MYSQL_USER:-root} --password="$MYSQL_PASSWORD" $MYSQL_DATABASE' >$DC.sql
+              sed -i 's/utf8mb4_0900_ai_ci/utf8mb4_general_ci/g' $DC.sql
+              gzip --force $DC.sql
+              ;;
+            postgresql)
+              oc -n $PROJECT exec $POD -- /bin/sh -c 'PATH=$PATH:/opt/rh/rh-postgresql94/root/usr/bin:/opt/rh/rh-postgresql95/root/usr/bin pg_dump $POSTGRESQL_DATABASE' >$DC.sql
+              gzip --force $DC.sql
+              ;;
+            file)
+              [ "$DC" == "$POD" ] && OBJ="pod/$POD" || OBJ="dc/$DC"
+              MOUNTS=`oc -n $PROJECT volume $OBJ |egrep -i "hostPath|pvc" -A1 |grep "mounted at" |awk '{print $3}'`
+              for MOUNT in $MOUNTS; do
+                mkdir -p $OBJ/$MOUNT
+                oc -n $PROJECT exec -i $POD -- tar -C $MOUNT -c --selinux --acls --xattrs . | tar -x -C $OBJ/$MOUNT
+              done
+            ;;
+            *)
+              echo "Unknown technology: '$TECH'. Possible values: mysql, postgresql, file."
+              ;;
+          esac
+      done
+
+      cd $DIR
+      git status 2>/dev/null
+      if [ $? == 0 ]; then
+        git add --all .
+        git commit -am "OpenShift Backup $DATE"
+        git tag "$DATE"
+        GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no" git push -u origin master
+      else
+        # compress
+        cd $DIR/..
+        tar czf ${DATE}.tgz $DATE
+        rm -r $DATE
+      fi
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: backup
+  spec:
+    accessModes:
+    - ReadWriteMany
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: "${VOLUME_SIZE}"
+    storageClassName: gp2-csi
+- kind: CronJob
+  apiVersion: batch/v1
+  metadata:
+    name: "${JOB_NAME}"
+  spec:
+    schedule: "${SCHEDULE}"
+    concurrencyPolicy: Forbid
+    backoffLimit: 1
+    successfulJobsHistoryLimit: "${{SUCCESS_JOBS_HISTORY_LIMIT}}"
+    failedJobsHistoryLimit: "${{FAILED_JOBS_HISTORY_LIMIT}}"
+    jobTemplate:
+      spec:
+        template:
+          spec:
+            containers:
+            - name: "${JOB_NAME}"
+              command:
+              - /backup.sh
+              image: registry.access.redhat.com/openshift3/jenkins-slave-base-rhel7:latest
+              env:
+              - name: DIR
+                value: "${DIR}"
+              - name: GIT_REPO
+                value: "${GIT_REPO}"
+              - name: GIT_SSH_COMMAND
+                value: ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no
+              - name: NAMESPACE
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.namespace
+              resources:
+                limits:
+                  cpu: '1'
+                  memory: 8Gi
+                requests:
+                  cpu: 125m
+                  memory: 64Mi
+              imagePullPolicy: IfNotPresent
+              volumeMounts:
+              - name: github-auth
+                mountPath: /home/jenkins/.ssh
+              - name: backup-pv
+                mountPath: /backup
+              - name: backup-script
+                mountPath: /backup.sh
+                subPath: backup.sh
+            restartPolicy: Never
+            terminationGracePeriodSeconds: 30
+            activeDeadlineSeconds: 14400
+            dnsPolicy: ClusterFirst
+            serviceAccountName: "${JOB_NAME}"
+            serviceAccount: "${JOB_NAME}"
+            securityContext: {}
+            volumes:
+            - name: github-auth
+              secret:
+                secretName: "${GITHUB_AUTH}"
+                defaultMode: 416
+                optional: true
+            - name: backup-script
+              configMap:
+                name: backup-script
+                defaultMode: 511
+            - name: backup-pv
+              persistentVolumeClaim:
+                claimName: backup
+- kind: ServiceAccount
+  apiVersion: v1
+  metadata:
+    name: ${JOB_NAME}
+    labels:
+      template: "backup"
+- apiVersion: rbac.authorization.k8s.io/v1
+  kind: RoleBinding
+  metadata:
+    name: backup
+  roleRef:
+    apiGroup: rbac.authorization.k8s.io
+    kind: ClusterRole
+    name: admin
+  subjects:
+  - kind: ServiceAccount
+    name: backup
+parameters:
+- name: "NAMESPACE"
+  required: false
+- name: JOB_NAME
+  displayName: Job Name
+  description: Name of the Scheduled Job to Create.
+  value: backup
+  required: true
+- name: SCHEDULE
+  displayName: Cron Schedule
+  description: Cron Schedule to Execute the Job
+  value: 0 0 * * *
+  required: true
+- name: VOLUME_SIZE
+  displayName: Backup Volume size
+  description: Size of Persistent Volume for storing Backups
+  value: 10Gi
+  required: true
+- name: DIR
+  displayName: Backup directory
+  description: subdirectory in PV
+  value: '/backup/openshift'
+  required: true
+- name: GIT_REPO
+  displayName: Git Repository
+  description: Git repo where to put backup files in
+  value: git@github.com:hoolia/backups.git
+  required: true
+- name: SUCCESS_JOBS_HISTORY_LIMIT
+  displayName: Successful Job History Limit
+  description: The number of successful jobs that will be retained
+  value: '1'
+  required: true
+- name: FAILED_JOBS_HISTORY_LIMIT
+  displayName: Failed Job History Limit
+  description: The number of failed jobs that will be retained
+  value: '1'
+  required: true
+- name: GITHUB_AUTH
+  displayName: Github secret
+  description: Secret containing Github auth credentials
+  value: 'github-deploykey'
+  required: false

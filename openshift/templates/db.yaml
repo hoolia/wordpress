@@ -1,0 +1,141 @@
+# Template
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: mysql
+labels:
+  template: mysql
+
+parameters:
+  - name: "NAMESPACE"
+    required: false
+  - name: "ENVIRONMENT"
+    required: true
+  - name: "APP_NAME"
+    required: true
+  - name: "PASSWORD"
+    required: true
+    generate: expression
+    from: root[a-zA-Z0-9]{64}
+
+objects:
+- apiVersion: v1
+  kind: Secret
+  metadata:
+    name: ${APP_NAME}-db
+  type: Opaque
+  stringData:
+    USER: root
+    USERNAME: root
+    PASSWORD: ${PASSWORD}
+    DATABASE: wordpress
+    NAME: wordpress
+    HOST: ${APP_NAME}-mysql
+    PORT: "3306"
+
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: ${APP_NAME}-mysql
+    labels:
+      app: ${APP_NAME}
+  spec:
+    ports:
+      - port: 3306
+    selector:
+      app: ${APP_NAME}
+      tier: mysql
+    clusterIP: None
+
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: ${APP_NAME}-data
+    labels:
+      app: ${APP_NAME}
+  spec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 20Gi
+    storageClassName: gp2-csi
+
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: mysql-conf
+  data:
+    utf8.cnf: |
+      [client]
+      default-character-set = utf8mb4
+      
+      [mysql]
+      default-character-set = utf8mb4
+      
+      [mysqld]
+      character-set-client-handshake = FALSE
+      character-set-server = utf8mb4
+      collation-server = utf8mb4_unicode_ci
+      sql-mode = "ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER"
+      
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: ${APP_NAME}-mysql
+    labels:
+      app: ${APP_NAME}
+      tier: mysql
+  spec:
+    selector:
+      matchLabels:
+        app: ${APP_NAME}
+        tier: mysql
+    strategy:
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          app: ${APP_NAME}
+          tier: mysql
+      spec:
+        containers:
+        - image: mariadb:10.5
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          args:
+          - --ignore-db-dir=lost+found
+          name: mysql
+          env:
+          - name: MYSQL_DATABASE
+            valueFrom:
+              secretKeyRef:
+                name: ${APP_NAME}-db
+                key: DATABASE
+          - name: MYSQL_ROOT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: ${APP_NAME}-db
+                key: PASSWORD
+          ports:
+          - containerPort: 3306
+            name: mysql
+          volumeMounts:
+          - name: mysql-persistent-storage
+            mountPath: /var/lib/mysql
+          - mountPath: /etc/mysql/mysql.conf.d/utf8.cnf
+            name: conf
+            subPath: utf8.cnf
+        volumes:
+        - name: mysql-persistent-storage
+          persistentVolumeClaim:
+            claimName: ${APP_NAME}-data
+        - configMap:
+            defaultMode: 420
+            name: mysql-conf
+          name: conf

@@ -3,7 +3,7 @@
 set -ex
 shopt -s dotglob
 
-cd /var/www
+cd /var/www/
 
 echo "---> Installing application source..."
 tar -C /tmp/src -cvf - . |tar -xvf -

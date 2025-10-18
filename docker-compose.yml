@@ -1,0 +1,60 @@
+version: "3.9"
+
+services:
+  proxy:
+    container_name: proxy
+    depends_on:
+      - wordpress
+    image:  mnuessler/tls-termination-proxy
+    ports:
+      - "443:443"
+    restart: always
+    environment:
+      HTTPS_UPSTREAM_SERVER_ADDRESS: wordpress
+      HTTPS_UPSTREAM_SERVER_PORT: 8080
+      CERT_PATH: /etc/ssl/cert.pem
+    volumes:
+      - ./bin/ssl:/etc/ssl:ro
+    platform: linux/amd64
+
+  db:
+    container_name: db
+#   image: mysql:5.7
+#   image: mysql:8
+    image: mariadb:10.5.24
+#   command: --default-authentication-plugin=mysql_native_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+#     - ./mysql/:/usr/local/flyway-9.19.4/sql/
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: somewordpress
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wordpress
+      MYSQL_PASSWORD: wordpress
+    platform: linux/amd64
+
+  wordpress:
+    container_name: wordpress
+    depends_on:
+      - db
+    image: image-registry.openshift-image-registry.svc.cluster.local:50000/default/wordpress:latest
+    ports:
+      - "8080:8080"
+    restart: always
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_TABLE_PREFIX: wp_ 
+      WORDPRESS_CURRENT_SITE: wordpress-default.apps.openshift.eu
+    volumes:
+      - ./html:/var/www/html
+    platform: linux/amd64
+
+volumes:
+  db_data:
+    name: wordpress-db
