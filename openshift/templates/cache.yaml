@@ -1,0 +1,51 @@
+# Template
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: redis
+labels:
+  template: redis
+
+parameters:
+  - name: "APP_NAME"
+    required: true
+  - name: "CACHE_NAME"
+    required: true
+  - name: "DB_PASSWORD"
+    required: true
+    generate: expression
+    from: root[a-zA-Z0-9]{64}
+
+objects:
+- apiVersion: v1
+  kind: Secret
+  type: Opaque
+  metadata:
+    name: redis-login
+  stringData:
+    password: "${DB_PASSWORD}"
+
+- apiVersion: dragonflydb.io/v1alpha1
+  kind: Dragonfly
+  metadata:
+    labels:
+      app.kubernetes.io/created-by: dragonfly-operator
+      app.kubernetes.io/instance: dragonfly
+      app.kubernetes.io/name: ${CACHE_NAME}
+      app.kubernetes.io/part-of: ${APP_NAME}
+    name: ${CACHE_NAME}
+  spec:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.30.1
+    replicas: 3
+    authentication:
+      passwordFromSecret:
+        name: ${CACHE_NAME}-login
+        key: password
+    memcachedPort: 11211
+    resources:
+      limits:
+        memory: 6Gi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    skipFSGroup: true

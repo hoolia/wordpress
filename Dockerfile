@@ -44,9 +44,17 @@ ADD configuration/ssl/*.crt /usr/local/share/ca-certificates/
 RUN update-ca-certificates
 
 ## PHP Plugins - MemCacheD ##
-#RUN apt-get update && apt-get install -y libmemcached-dev zlib1g-dev \
-#    && pecl install memcached \
-#    && docker-php-ext-enable memcached
+RUN apt-get update && apt-get install -y libmemcached-dev zlib1g-dev \
+    && pecl install memcache  \
+    && pecl install memcached \
+    && docker-php-ext-enable memcache \
+    && docker-php-ext-enable memcached
+
+## PHP Plugins - MemCacheD ##
+RUN apt-get update && apt-get install -y libzip-dev \
+    && pecl install redis \
+    && docker-php-ext-enable redis
+
 
 ## PHP Plugins - Misc ##
 RUN docker-php-ext-enable opcache

@@ -117,7 +117,6 @@ objects:
     resources:
       requests:
         storage: "${VOLUME_SIZE}"
-    storageClassName: gp2-csi
 - kind: CronJob
   apiVersion: batch/v1
   metadata:

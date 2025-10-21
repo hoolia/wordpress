@@ -1,3 +1,5 @@
+include openshift/params/test.ini
+
 help:
 	@echo "build     - Builds Docker Image"
 	@echo "install   - Build   + Generate TLS Certificate"
@@ -9,10 +11,11 @@ help:
 	@echo "logs      - Show PHP Wordpress logs"
 	@echo "query     - MySQL command prompt"
 	@echo "export    - Makes a mysqldump and saves it to git"
+	@echo "apply     - Deploy to Openshift"
 
 build:
-	gunzip -c backup/mysql/default/wordpress.sql.gz |sed 's/utf8mb4_0900_ai_ci/utf8mb4_general_ci/g' >mysql/V0__site.sql && gzip -f mysql/V0__site.sql
-	sudo docker build -t image-registry.openshift-image-registry.svc.cluster.local:50000/default/wordpress:latest .
+	gunzip -c backup/mysql/$(NAMESPACE)/$(APP_NAME).sql.gz |sed 's/utf8mb4_0900_ai_ci/utf8mb4_general_ci/g' >mysql/V0__site.sql && gzip -f mysql/V0__site.sql
+	sudo docker build -t image-registry.openshift-image-registry.svc.cluster.local:50000/$(NAMESPACE)/$(APP_NAME):latest .
 
 install: build
 	mkdir -p ./bin/ssl
@@ -67,5 +70,8 @@ export:
 	#git push
 
 apply:
-	oc process --param-file openshift/params/prod.ini -f openshift/templates/db.yaml
-	oc process --param-file openshift/params/prod.ini -f openshift/templates/deploy.yaml
+	oc get ns $(NAMESPACE) || oc create ns $(NAMESPACE)
+	oc -n $(NAMESPACE) process --allow-missing-template-keys --ignore-unknown-parameters --param-file openshift/params/prod.ini -f openshift/templates/db.yaml |oc -n $(NAMESPACE) apply -f -
+	oc -n $(NAMESPACE) process --allow-missing-template-keys --ignore-unknown-parameters --param-file openshift/params/prod.ini -f openshift/templates/cache.yaml |oc -n $(NAMESPACE) apply -f -
+	oc -n $(NAMESPACE) process --allow-missing-template-keys --ignore-unknown-parameters --param-file openshift/params/prod.ini -f openshift/templates/deploy.yaml |oc -n $(NAMESPACE) apply -f -
+	oc start-build $(APP_NAME) --from-dir=. -Fw

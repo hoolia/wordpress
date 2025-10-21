@@ -13,6 +13,8 @@ parameters:
     required: true
   - name: "APP_NAME"
     required: true
+  - name: "DB_NAME"
+    required: true
   - name: "WORDPRESS_CURRENT_SITE"
     required: true
   - name: "RESOURCES_REQUEST_CPU"
@@ -26,25 +28,18 @@ parameters:
 
 objects:
   
-  # Namespace
-  - apiVersion: v1
-    kind: Namespace
-    metadata:
-      annotations:
-        security.openshift.io/MinimallySufficientPodSecurityStandard: baseline
-      labels:
-        kubernetes.io/metadata.name: "${NAMESPACE}"
-        pod-security.kubernetes.io/audit: baseline
-        pod-security.kubernetes.io/warn: baseline
-      name: "${NAMESPACE}"
-
   # BuildConfig 
   - apiVersion: build.openshift.io/v1
     kind: BuildConfig
     metadata:
+      labels:
+        app.kubernetes.io/name: "${APP_NAME}-build"
+        app.kubernetes.io/part-of: "${APP_NAME}"
+        app.kubernetes.io/component: "wordpress"
+        app.kubernetes.io/version: "2.0"
+        app.kubernetes.io/managed-by: "kustomize"
+        app: "${APP_NAME}"
       name: ${APP_NAME}
-    labels:
-      app: ${APP_NAME}
     spec:
       failedBuildsHistoryLimit: 1
       successfulBuildsHistoryLimit: 1
@@ -55,7 +50,7 @@ objects:
       postCommit: {}
       resources:
         limits:
-          memory: "1Gi"
+          memory: "2Gi"
       runPolicy: Serial
       source:
         binary:
@@ -68,9 +63,14 @@ objects:
   - apiVersion: image.openshift.io/v1
     kind: ImageStream
     metadata:
-      name: ${APP_NAME}
       labels:
-        app: ${APP_NAME}
+        app.kubernetes.io/name: "${APP_NAME}-image"
+        app.kubernetes.io/part-of: "${APP_NAME}"
+        app.kubernetes.io/component: "wordpress"
+        app.kubernetes.io/version: "2.0"
+        app.kubernetes.io/managed-by: "kustomize"
+        app: "${APP_NAME}"
+      name: ${APP_NAME}
     spec:
       lookupPolicy:
         local: true
@@ -79,7 +79,13 @@ objects:
   - apiVersion: v1
     kind: PersistentVolumeClaim
     metadata:
-      name: wordpress-wp-uploads
+      name: wordpress-content
+      labels:
+        app.kubernetes.io/name: "${APP_NAME}-content"
+        app.kubernetes.io/part-of: "${APP_NAME}"
+        app.kubernetes.io/component: "wordpress"
+        app.kubernetes.io/version: "2.0"
+        app.kubernetes.io/managed-by: "kustomize"
     spec:
       accessModes:
         - ReadWriteOnce
@@ -92,18 +98,21 @@ objects:
     kind: Deployment
     metadata:
       name: ${APP_NAME}
+      labels:
+        app.kubernetes.io/name: "${APP_NAME}-deploy"
+        app.kubernetes.io/part-of: "${APP_NAME}"
+        app.kubernetes.io/component: "wordpress"
+        app.kubernetes.io/version: "2.0"
+        app.kubernetes.io/managed-by: "kustomize"
       annotations:
         image.openshift.io/triggers: >-
-          [
-            {
-              "from": {
+          [{ "from": {
                 "kind": "ImageStreamTag",
                 "name": "${APP_NAME}:${ENVIRONMENT}"
-              },
-              "fieldPath": "spec.template.spec.containers[?(@.name==\"${APP_NAME}\")].image",
-              "pause": false
-            }
-          ]
+             },
+             "fieldPath": "spec.template.spec.containers[?(@.name==\"wordpress\")].image",
+             "pause": false
+          }]
     spec:
       replicas: 1
       revisionHistoryLimit: 1
@@ -122,8 +131,8 @@ objects:
             backup: daily
         spec:
           containers:
-            - name: ${APP_NAME}
-              image: ${IMAGE}
+            - name: wordpress
+              image: "${APP_NAME}:${ENVIRONMENT}"
               imagePullPolicy: Always
               resources:
                 requests:
@@ -136,8 +145,8 @@ objects:
                 - containerPort: 8080
                   name: http
               volumeMounts:
-                - name: wordpress-wp-uploads
-                  mountPath: /var/www/html/wp-content/uploads
+                - name: wordpress-content
+                  mountPath: /var/www/html/wp-content
               readinessProbe:
                 exec:
                   command:
@@ -158,10 +167,10 @@ objects:
                 timeoutSeconds: 10
               envFrom:
                 - secretRef:
-                    name: ${APP_NAME}-db
+                    name: ${DB_NAME}-login
                   prefix: WORDPRESS_DB_
                 - secretRef:
-                    name: ${APP_NAME}-db
+                    name: ${DB_NAME}-login
                   prefix: MYSQL_
               env:
                 - name: ENVIRONMENT
@@ -173,18 +182,23 @@ objects:
                 - name: WORDPRESS_CURRENT_SITE
                   value: ${WORDPRESS_CURRENT_SITE}
           volumes:
-            - name: wordpress-wp-uploads
+            - name: wordpress-content
               persistentVolumeClaim:
-                claimName: wordpress-wp-uploads
+                claimName: wordpress-content
   
   # Service
   - apiVersion: v1
     kind: Service
     metadata:
       labels:
-        app: ${APP_NAME}
-        component: wordpress
-      name: ${APP_NAME}
+        app.kubernetes.io/name: "${APP_NAME}-svc"
+        app.kubernetes.io/part-of: "${APP_NAME}"
+        app.kubernetes.io/component: "wordpress"
+        app.kubernetes.io/version: "2.0"
+        app.kubernetes.io/managed-by: "kustomize"
+        app: "${APP_NAME}"
+        component: "wordpress"
+      name: "${APP_NAME}"
     spec:
       ports:
       - name: 8080-tcp
@@ -206,11 +220,20 @@ objects:
     kind: Route
     metadata:
       annotations:
+        cert-manager.io/issuer-kind: ClusterIssuer
+        cert-manager.io/issuer-name: letsencrypt
+        cert-manager.io/renew-before: 24h
         haproxy.router.openshift.io/hsts_header: max-age=31536000
       labels:
-        app: ${APP_NAME}
+        app.kubernetes.io/name: "${APP_NAME}-route"
+        app.kubernetes.io/part-of: "${APP_NAME}"
+        app.kubernetes.io/component: "wordpress"
+        app.kubernetes.io/version: "2.0"
+        app.kubernetes.io/managed-by: "kustomize"
+        app: "${APP_NAME}"
       name: ${APP_NAME}
     spec:
+      host: www.${WORDPRESS_CURRENT_SITE}
       port:
         targetPort: 8080-tcp
       to:
@@ -218,6 +241,36 @@ objects:
         name: ${APP_NAME}
         weight: 100
       wildcardPolicy: None
-    tls:
-      termination: edge
-      insecureEdgeTerminationPolicy: Allow
+      tls:
+        termination: edge
+        insecureEdgeTerminationPolicy: Allow
+
+  - apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata:
+      annotations:
+        cert-manager.io/issuer-kind: ClusterIssuer
+        cert-manager.io/issuer-name: letsencrypt
+        cert-manager.io/renew-before: 24h
+        haproxy.router.openshift.io/rewrite-target: "https://www.${WORDPRESS_CURRENT_SITE}$1"
+        haproxy.router.openshift.io/hsts_header: "max-age=31536000"
+      labels:
+        app.kubernetes.io/name: "${APP_NAME}-route"
+        app.kubernetes.io/part-of: "${APP_NAME}"
+        app.kubernetes.io/component: "wordpress"
+        app.kubernetes.io/version: "2.0"
+        app.kubernetes.io/managed-by: "kustomize"
+        app: "${APP_NAME}"
+      name: naked
+    spec:
+      host: ${WORDPRESS_CURRENT_SITE}
+      port:
+        targetPort: http
+      tls:
+        insecureEdgeTerminationPolicy: Redirect
+        termination: edge
+      to:
+        kind: Service
+        name: wordpress-svc
+        weight: 100
+      wildcardPolicy: None

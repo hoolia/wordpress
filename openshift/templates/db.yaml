@@ -13,7 +13,9 @@ parameters:
     required: true
   - name: "APP_NAME"
     required: true
-  - name: "PASSWORD"
+  - name: "DB_NAME"
+    required: true
+  - name: "DB_PASSWORD"
     required: true
     generate: expression
     from: root[a-zA-Z0-9]{64}
@@ -22,120 +24,208 @@ objects:
 - apiVersion: v1
   kind: Secret
   metadata:
-    name: ${APP_NAME}-db
+    labels:
+      app.kubernetes.io/name: "${DB_NAME}-login"
+      app.kubernetes.io/part-of: "${APP_NAME}"
+      app.kubernetes.io/component: "${DB_NAME}"
+      app.kubernetes.io/version: "2.0"
+      app.kubernetes.io/managed-by: "kustomize"
+    name: ${DB_NAME}-login
   type: Opaque
   stringData:
     USER: root
     USERNAME: root
-    PASSWORD: ${PASSWORD}
+    PASSWORD: ${DB_PASSWORD}
     DATABASE: wordpress
     NAME: wordpress
-    HOST: ${APP_NAME}-mysql
+    HOST: ${DB_NAME}
     PORT: "3306"
-
-- apiVersion: v1
-  kind: Service
-  metadata:
-    name: ${APP_NAME}-mysql
-    labels:
-      app: ${APP_NAME}
-  spec:
-    ports:
-      - port: 3306
-    selector:
-      app: ${APP_NAME}
-      tier: mysql
-    clusterIP: None
 
 - apiVersion: v1
   kind: PersistentVolumeClaim
   metadata:
-    name: ${APP_NAME}-data
     labels:
+      app.kubernetes.io/name: "${DB_NAME}-data"
+      app.kubernetes.io/part-of: "${APP_NAME}"
+      app.kubernetes.io/component: "${DB_NAME}"
+      app.kubernetes.io/version: "2.0"
+      app.kubernetes.io/managed-by: "kustomize"
       app: ${APP_NAME}
+    name: ${DB_NAME}-backups
   spec:
     accessModes:
       - ReadWriteOnce
     resources:
       requests:
         storage: 20Gi
-    storageClassName: gp2-csi
 
-- apiVersion: v1
-  kind: ConfigMap
+
+- apiVersion: k8s.mariadb.com/v1alpha1
+  kind: MariaDB
   metadata:
-    name: mysql-conf
-  data:
-    utf8.cnf: |
-      [client]
-      default-character-set = utf8mb4
-      
-      [mysql]
-      default-character-set = utf8mb4
-      
-      [mysqld]
-      character-set-client-handshake = FALSE
-      character-set-server = utf8mb4
-      collation-server = utf8mb4_unicode_ci
-      sql-mode = "ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER"
-      
-- apiVersion: apps/v1
-  kind: Deployment
-  metadata:
-    name: ${APP_NAME}-mysql
-    labels:
-      app: ${APP_NAME}
-      tier: mysql
+    name: ${DB_NAME}
   spec:
-    selector:
-      matchLabels:
-        app: ${APP_NAME}
-        tier: mysql
-    strategy:
-      type: Recreate
-    template:
-      metadata:
-        labels:
-          app: ${APP_NAME}
-          tier: mysql
-      spec:
-        containers:
-        - image: mariadb:10.5
+    username: mariadb
+    database: mariadb
+    rootPasswordSecretKeyRef:
+      name: ${DB_NAME}-login
+      key: PASSWORD
+      generate: false
+  
+    storage:
+      size: 10Gi
+  
+#   ha:
+#     enabled: true
+    galera:
+      enabled: true
+      recovery:
+        enabled: false
+        job:
+          metadata:
+            labels:
+              sidecar.istio.io/inject: "false"
           resources:
             requests:
-              cpu: "10m"
-              memory: "256Mi"
+              cpu: 100m
+              memory: 128Mi
             limits:
-              cpu: "1"
-              memory: "1Gi"
-          args:
-          - --ignore-db-dir=lost+found
-          name: mysql
-          env:
-          - name: MYSQL_DATABASE
-            valueFrom:
-              secretKeyRef:
-                name: ${APP_NAME}-db
-                key: DATABASE
-          - name: MYSQL_ROOT_PASSWORD
-            valueFrom:
-              secretKeyRef:
-                name: ${APP_NAME}-db
-                key: PASSWORD
-          ports:
-          - containerPort: 3306
-            name: mysql
-          volumeMounts:
-          - name: mysql-persistent-storage
-            mountPath: /var/lib/mysql
-          - mountPath: /etc/mysql/mysql.conf.d/utf8.cnf
-            name: conf
-            subPath: utf8.cnf
-        volumes:
-        - name: mysql-persistent-storage
-          persistentVolumeClaim:
-            claimName: ${APP_NAME}-data
-        - configMap:
-            defaultMode: 420
-            name: mysql-conf
-          name: conf
+              memory: 8Gi
+    replicas: 3
+  
+#    myCnf: |
+#      [mariadb]
+#      default_storage_engine=InnoDB
+#      binlog_format=row
+#      innodb_autoinc_lock_mode=2
+#      innodb_buffer_pool_size=1024M
+#      max_allowed_packet=256M
+#      bind-address=*
+
+    livenessProbe:
+      periodSeconds: 60
+      timeoutSeconds: 10
+      initialDelaySeconds: 60
+      failureThreshold: 10
+  
+    readinessProbe:
+      periodSeconds: 60
+      timeoutSeconds: 10
+      failureThreshold: 10
+  
+    startupProbe:
+      failureThreshold: 10
+      periodSeconds: 60
+      timeoutSeconds: 10
+  
+    updateStrategy:
+      type: ReplicasFirstPrimaryLast
+      autoUpdateDataPlane: true
+
+    tls:
+      enabled: false
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 4Gi
+      limits:
+        memory: 4Gi
+  
+#   bootstrapFrom:
+#     volume:
+#       persistentVolumeClaim:
+#         claimName: ${DB_NAME}-backups
+
+    metrics:
+      enabled: true
+      serviceMonitor:
+        enabled: true
+
+#    webhook:
+#      cert:
+#        certManager:
+#          enabled: true
+      priorityClassName: system-node-critical
+      affinity:
+        antiAffinityEnabled: true
+      podDisruptionBudget:
+        maxUnavailable: 66%
+
+- apiVersion: k8s.mariadb.com/v1alpha1
+  kind: Database
+  metadata:
+    name: wordpress
+  spec:
+    mariaDbRef:
+      name: ${DB_NAME}
+    characterSet: utf8mb4
+    collate: utf8mb4_unicode_ci
+
+- apiVersion: k8s.mariadb.com/v1alpha1
+  kind: User
+  metadata:
+    name: ${DB_NAME}-login
+  spec:
+    mariaDbRef:
+      name: ${DB_NAME}
+    passwordSecretKeyRef:
+      name: ${DB_NAME}-login
+      key: USERNAME
+    maxUserConnections: 20
+
+- apiVersion: k8s.mariadb.com/v1alpha1
+  kind: Grant
+  metadata:
+    name: ${DB_NAME}-login
+  spec:
+    mariaDbRef:
+      name: ${DB_NAME}
+    privileges:
+      - "ALL PRIVILEGES"
+    database: "*"
+    table: "*"
+    username: root
+
+#- apiVersion: objectbucket.io/v1alpha1
+#  kind: ObjectBucketClaim
+#  metadata:
+#    name: backup
+#  spec:
+#    generateBucketName: backup
+#    storageClassName: openshift-storage.noobaa.io
+ 
+- apiVersion: k8s.mariadb.com/v1alpha1
+  kind: Backup
+  metadata:
+    name: ${DB_NAME}-backup
+  spec:
+    mariaDbRef:
+      name: ${DB_NAME}
+    schedule:
+      cron: "0 2 * * *"
+      suspend: false
+    maxRetention: 720h # 30 days
+    storage:
+      persistentVolumeClaim:
+        accessModes:
+          - ReadWriteMany
+        resources:
+          requests:
+            storage: 20Gi
+#      s3:
+#        bucket: ${NAMESPACE}
+#        prefix: ${DB_NAME}-backup
+#        endpoint: s3.openshift-storage.svc.cluster.local:443
+#        region:  us-east-1
+#        accessKeyIdSecretKeyRef:
+#          name: backup
+#          key: AWS_ACCESS_KEY_ID
+#        secretAccessKeySecretKeyRef:
+#          name: backup
+#          key: AWS_SECRET_ACCESS_KEY
+#       tls:
+#         enabled: true
+#         caSecretKeyRef:
+#           name: minio-ca
+#           key: tls.crt

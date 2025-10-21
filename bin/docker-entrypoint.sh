@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #set -Eeuo pipefail
-set -Eu
+set -Eux
 
 if [[ "$1" == apache2* ]] || [ "$1" = 'php-fpm' ]; then
 	uid="$(id -u)"
@@ -30,7 +30,7 @@ if [[ "$1" == apache2* ]] || [ "$1" = 'php-fpm' ]; then
 	if [ ! -e index.php ] && [ ! -e wp-includes/version.php ]; then
 		# if the directory exists and WordPress doesn't appear to be installed AND the permissions of it are root:root, let's chown it (likely a Docker-created directory)
 		if [ "$uid" = '0' ] && [ "$(stat -c '%u:%g' .)" = '0:0' ]; then
-			chown "$user:$group" .
+			chown -R "$user:$group" . || true
 		fi
 
 		if [ -n "$(find -mindepth 1 -maxdepth 1 -not -name wp-content)" ]; then
@@ -64,9 +64,9 @@ if [[ "$1" == apache2* ]] || [ "$1" = 'php-fpm' ]; then
 				sourceTarArgs+=( --exclude "./$contentPath" )
 			fi
 		done
-		tar "${sourceTarArgs[@]}" . | tar "${targetTarArgs[@]}" |true
+		tar "${sourceTarArgs[@]}" . | tar "${targetTarArgs[@]}" || true
 	fi
-    cp -a /usr/src/wordpress/* /var/www/html/ 2>&1 |grep -v "Operation not permitted" |grep -v "Permission denied"
+    (cd /usr/src/wordpress && tar cf - .) | (cd /var/www/html/ && tar xvf -) 2>&1 |grep -v "Operation not permitted" |grep -v "Permission denied"
     echo >&2 "Complete! WordPress has been successfully copied to $PWD"
 
 	wpEnvs=( "${!WORDPRESS_@}" )
