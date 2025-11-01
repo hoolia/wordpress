@@ -88,7 +88,7 @@ objects:
         app.kubernetes.io/managed-by: "kustomize"
     spec:
       accessModes:
-        - ReadWriteOnce
+        - ReadWriteMany
       resources:
         requests:
           storage: 10Gi
@@ -201,11 +201,11 @@ objects:
       name: "${APP_NAME}"
     spec:
       ports:
-      - name: 8080-tcp
+      - name: http
         port: 8080
         protocol: TCP
         targetPort: 8080
-      - name: 8443-tcp
+      - name: https
         port: 8443
         protocol: TCP
         targetPort: 8443
@@ -235,7 +235,7 @@ objects:
     spec:
       host: www.${WORDPRESS_CURRENT_SITE}
       port:
-        targetPort: 8080-tcp
+        targetPort: http
       to:
         kind: Service
         name: ${APP_NAME}
@@ -262,6 +262,7 @@ objects:
         app.kubernetes.io/managed-by: "kustomize"
         app: "${APP_NAME}"
       name: naked
+      namespace: grn-cloud
     spec:
       host: ${WORDPRESS_CURRENT_SITE}
       port:
@@ -271,6 +272,6 @@ objects:
         termination: edge
       to:
         kind: Service
-        name: wordpress-svc
+        name: wordpress
         weight: 100
       wildcardPolicy: None

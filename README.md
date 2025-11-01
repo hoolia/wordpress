@@ -13,3 +13,4 @@ oc new-build https://github.com/hoolia/wordpress.git
 - 2015-09-14: Removed mysql dependency
 - 2016-08-14: Added S2I scripts
 - 2016-08-14: Added Flyway
+- 2025-10-01: Added Redis Cache + MariaDB Operator

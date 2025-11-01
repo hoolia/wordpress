@@ -1,0 +1,12 @@
+apiVersion: mariadb.oracle.com/v1alpha1
+apiVersion: k8s.mariadb.com/v1alpha1
+kind: Restore
+metadata:
+  name: mysql-20251031
+  namespace: grncloud-wordpress
+spec:
+  mariaDbRef:
+    name: mysql
+  backupRef:
+    name: mysql-backup
+  targetRecoveryTime: 2025-11-01T15:00:00Z
